@@ -2,8 +2,9 @@
 from datetime import datetime
 import json
 import os
+import pandas as pd
 
-# --- 1. CONFIGURACIÓN Y ARCHIVOS (TU LÓGICA ORIGINAL) ---
+# --- 1. CONFIGURACIÓN DE ARCHIVOS ---
 DATA_FILE = "inventario_data.json"
 
 def verificar_archivos():
@@ -14,8 +15,7 @@ def cargar_datos():
     try:
         if os.path.exists(DATA_FILE):
             with open(DATA_FILE, "r") as f: 
-                data = json.load(f)
-                return {str(k): v for k, v in data.items()}
+                return json.load(f)
     except: return {}
     return {}
 
@@ -36,121 +36,127 @@ if 'autenticado' not in st.session_state:
 # --- 3. LOGIN ---
 if not st.session_state.autenticado:
     st.title("🧔 BIENVENIDO A BIGOTES VALENTIN")
-    with st.container():
-        user = st.text_input("Usuario (admin)")
-        password = st.text_input("Contraseña (12345)", type="password")
+    col_l, col_r = st.columns(2)
+    with col_l:
+        user = st.text_input("Usuario")
+        password = st.text_input("Contraseña", type="password")
         if st.button("ENTRAR"):
             if user == "admin" and password == "12345":
                 st.session_state.autenticado = True
                 st.rerun()
-            else:
-                st.error("Credenciales incorrectas")
+            else: st.error("Credenciales incorrectas")
 else:
-    # --- 4. MENÚ PRINCIPAL ---
-    st.sidebar.title("🧔 Bigotes Valentin")
-    menu = st.sidebar.radio("MENÚ", ["📦 GESTIÓN E HISTORIAL", "❓ AYUDA", "❌ SALIR"])
+    # --- 4. PANEL PRINCIPAL ---
+    st.title("🧔 Sistema Bigotes Valentin - Panel de Control")
+    
+    # MÉTRICAS RÁPIDAS (Resumen arriba)
+    total_prods = len(st.session_state.inventario)
+    total_movs = sum(len(d[3]) for d in st.session_state.inventario.values())
+    
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Productos Registrados", total_prods)
+    c2.metric("Movimientos Totales", total_movs)
+    c3.write("📅 Fecha actual: " + datetime.now().strftime("%d/%m/%Y"))
 
-    if menu == "❌ SALIR":
-        st.session_state.autenticado = False
-        st.rerun()
+    st.divider()
 
-    elif menu == "❓ AYUDA":
-        st.info("### GUÍA RÁPIDA:\n- **NUEVO:** Registra un producto.\n- **MOVER:** Salida a profesor.\n- **REINTEGRO:** Limpia historial y devuelve stock.\n- **ELIMINAR:** Borra del archivo.")
+    # --- SECCIÓN DE ACCIONES ---
+    with st.sidebar:
+        st.header("⚙️ Operaciones")
+        opcion = st.radio("Selecciona una tarea:", ["Ver Inventario", "Registrar Nuevo", "Mover a Profesor", "Reintegro/Limpiar"])
+        if st.button("Cerrar Sesión"):
+            st.session_state.autenticado = False
+            st.rerun()
 
-    elif menu == "📦 GESTIÓN E HISTORIAL":
-        st.title("📦 Gestión de Inventario")
+    # --- PANTALLA: VER INVENTARIO e HISTORIAL (La que pediste) ---
+    if opcion == "Ver Inventario":
+        st.subheader("📦 Registro de Productos e Historial")
         
-        # BARRA DE BOTONES
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            if st.button("➕ NUEVO"): st.session_state.accion = "nuevo"
-        with col2:
-            if st.button("🔍 BUSCAR"): st.session_state.accion = "buscar"
-        with col3:
-            if st.button("🚚 MOVER"): st.session_state.accion = "mover"
-        with col4:
-            if st.button("🔄 REINTEGRO"): st.session_state.accion = "reintegro"
+        # BUSCADOR
+        busqueda = st.text_input("🔍 Buscar por código o nombre:").upper()
 
-        accion = st.session_state.get('accion', None)
+        # Preparar datos para las tablas
+        datos_reg = []
+        datos_his = []
+        for cod, d in st.session_state.inventario.items():
+            # Filtrar para la tabla de registros
+            if busqueda in str(cod).upper() or busqueda in str(d[0]).upper():
+                datos_reg.append({
+                    "Código": cod, "Nombre": d[0], "Sirve": d[1], 
+                    "No Sirve": d[2], "Total": d[1]+d[2]
+                })
+                # Llenar historial
+                for h in d[3]:
+                    datos_his.append({
+                        "Fecha": h[0], "Código": h[1], "Cant.": h[2], 
+                        "Estado": h[3], "Profesor": h[4]
+                    })
 
-        # FORMULARIO: NUEVO
-        if accion == "nuevo":
-            with st.expander("📝 NUEVO PRODUCTO", expanded=True):
-                c = st.text_input("CÓDIGO")
-                n = st.text_input("NOMBRE").upper()
-                s = st.number_input("SIRVE", min_value=0)
-                ns = st.number_input("NO SIRVE", min_value=0)
-                if st.button("GUARDAR"):
+        # Mostrar Tabla de Registros
+        st.write("### 🗃️ Inventario Actual")
+        if datos_reg:
+            df_reg = pd.DataFrame(datos_reg)
+            st.dataframe(df_reg, use_container_width=True, hide_index=True)
+        else: st.info("No hay productos que coincidan.")
+
+        # Mostrar Tabla de Historial
+        st.write("### 📜 Historial de Movimientos")
+        if datos_his:
+            df_his = pd.DataFrame(datos_his)
+            st.dataframe(df_his, use_container_width=True, hide_index=True)
+        else: st.info("No hay movimientos registrados.")
+
+    # --- PANTALLA: NUEVO ---
+    elif opcion == "Registrar Nuevo":
+        st.subheader("📝 Agregar Nuevo Producto")
+        with st.form("form_nuevo"):
+            c = st.text_input("Código")
+            n = st.text_input("Nombre").upper()
+            s = st.number_input("Cantidad Sirve", min_value=0)
+            ns = st.number_input("Cantidad No Sirve", min_value=0)
+            if st.form_submit_button("Guardar Producto"):
+                if c:
                     st.session_state.inventario[c] = [n, s, ns, []]
                     guardar_todo(st.session_state.inventario)
-                    st.success("Guardado correctamente")
-                    st.rerun()
+                    st.success(f"Producto {c} guardado correctamente.")
+                    st.balloons()
+                else: st.error("El código es obligatorio.")
 
-        # FORMULARIO: BUSCAR
-        elif accion == "buscar":
-            with st.expander("🔍 BUSCAR PRODUCTO", expanded=True):
-                busq = st.text_input("Código a buscar")
-                if st.button("BUSCAR"):
-                    if busq in st.session_state.inventario:
-                        d = st.session_state.inventario[busq]
-                        st.info(f"Nombre: {d[0]} | Total: {d[1]+d[2]}")
-                    else: st.error("No existe")
-
-        # FORMULARIO: MOVER
-        elif accion == "mover":
-            if st.session_state.inventario:
-                with st.expander("🚚 MOVER A PROFESOR", expanded=True):
-                    c = st.selectbox("Código", list(st.session_state.inventario.keys()))
-                    q = st.number_input("Cantidad", min_value=1)
-                    est = st.radio("Estado", ["Sirve", "No Sirve"])
-                    profe = st.text_input("Nombre del Profesor").upper()
-                    if st.button("REGISTRAR"):
-                        idx = 1 if est == "Sirve" else 2
-                        if st.session_state.inventario[c][idx] >= q:
-                            st.session_state.inventario[c][idx] -= q
-                            f = datetime.now().strftime("%d/%m %H:%M")
-                            st.session_state.inventario[c][3].append([f, c, q, est, profe])
-                            guardar_todo(st.session_state.inventario)
-                            st.success("Movimiento registrado")
-                            st.rerun()
-                        else: st.error("Sin stock suficiente")
-            else: st.warning("No hay productos")
-
-        # FORMULARIO: REINTEGRO
-        elif accion == "reintegro":
-            if st.session_state.inventario:
-                with st.expander("🔄 REINTEGRO", expanded=True):
-                    c = st.selectbox("Código para reintegro", list(st.session_state.inventario.keys()))
-                    q = st.number_input("Cantidad a devolver", min_value=1)
-                    est = st.radio("Tipo", ["Sirve", "No Sirve"])
-                    if st.button("REINTEGRAR"):
-                        idx = 1 if est == "Sirve" else 2
-                        st.session_state.inventario[c][idx] += q
-                        st.session_state.inventario[c][3] = [] 
-                        guardar_todo(st.session_state.inventario)
-                        st.success("Stock recuperado")
-                        st.rerun()
-
-        # --- TABLAS DE DATOS ---
-        st.markdown("---")
-        st.subheader("📊 Registro Actual")
+    # --- PANTALLA: MOVER ---
+    elif opcion == "Mover a Profesor":
+        st.subheader("🚚 Registro de Salida")
         if st.session_state.inventario:
-            datos_tabla = []
-            for cod, d in st.session_state.inventario.items():
-                datos_tabla.append({"Código": cod, "Nombre": d[0], "Sirve": d[1], "No Sirve": d[2], "Total": d[1]+d[2]})
-            st.table(datos_tabla)
-
-            cod_del = st.selectbox("Eliminar Producto (Permanente)", [""] + list(st.session_state.inventario.keys()))
-            if st.button("🗑️ ELIMINAR SELECCIONADO"):
-                if cod_del:
-                    del st.session_state.inventario[cod_del]
+            c = st.selectbox("Selecciona el Código", list(st.session_state.inventario.keys()))
+            q = st.number_input("Cantidad a entregar", min_value=1)
+            est = st.radio("Estado de la pieza", ["Sirve", "No Sirve"])
+            profe = st.text_input("Nombre del Profesor").upper()
+            if st.button("Registrar Salida"):
+                idx = 1 if est == "Sirve" else 2
+                if st.session_state.inventario[c][idx] >= q:
+                    st.session_state.inventario[c][idx] -= q
+                    f = datetime.now().strftime("%d/%m %H:%M")
+                    st.session_state.inventario[c][3].append([f, c, q, est, profe])
                     guardar_todo(st.session_state.inventario)
-                    st.rerun()
+                    st.success("Movimiento registrado con éxito.")
+                else: st.error("Stock insuficiente en esa categoría.")
+        else: st.warning("Primero debes registrar productos.")
 
-        st.subheader("📜 Historial")
-        historial = []
-        for cod, d in st.session_state.inventario.items():
-            for h in d[3]: historial.append({"Fecha": h[0], "Cod": h[1], "Cant": h[2], "E": h[3], "Profe": h[4]})
-        if historial: st.dataframe(historial)
-        else: st.write("Historial vacío")
-    
+    # --- PANTALLA: REINTEGRO ---
+    elif opcion == "Reintegro/Limpiar":
+        st.subheader("🔄 Reintegro y Limpieza")
+        c = st.selectbox("Selecciona Código", list(st.session_state.inventario.keys()))
+        q = st.number_input("Cantidad a reintegrar", min_value=1)
+        est = st.radio("Tipo de Reintegro", ["Sirve", "No Sirve"])
+        col_r1, col_r2 = st.columns(2)
+        if col_r1.button("REINTEGRAR"):
+            idx = 1 if est == "Sirve" else 2
+            st.session_state.inventario[c][idx] += q
+            st.session_state.inventario[c][3] = [] # Limpia historial
+            guardar_todo(st.session_state.inventario)
+            st.success("Reintegro procesado e historial limpio.")
+        
+        if col_r2.button("⚠️ ELIMINAR PRODUCTO"):
+            del st.session_state.inventario[c]
+            guardar_todo(st.session_state.inventario)
+            st.warning("Producto eliminado permanentemente.")
+            st.rerun()
